@@ -63,3 +63,5 @@ xvlog.*
 
 ## checkpoint files
 *.dcp
+## standalone simulation output
+sim/build/

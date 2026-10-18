@@ -11,8 +11,14 @@ module top (
 
   logic clk;
   logic btnc_pulse;
-  logic data_ready;
+  logic rx_done;
+
   logic [7:0] data_buf = '0;
+  logic [7:0] hold_buf = '0;
+
+  logic pending = '0;
+  logic tx_ready;
+  logic tx_start;
 
   IBUFDS u_clk_buf (
       .I (sysclk_p),
@@ -43,8 +49,19 @@ module top (
       .clk_i(clk),
       .rx_raw_i(uart_tx_i),
       .rx_buf_o(data_buf),
-      .done_o(data_ready)
+      .done_o(rx_done)
   );
+
+  // put RX buf into holding buf while TX busy
+  always_ff @(posedge clk) begin
+    if (rx_done) begin
+      hold_buf <= data_buf;
+      pending  <= '1;
+    end else if (tx_start) begin
+      pending <= '0;
+    end
+  end
+  assign tx_start = pending & tx_ready;
 
   // FPGA -> PC
   UART_tx #(
@@ -52,8 +69,9 @@ module top (
       .BAUDRATE(BaudRate)
   ) uart_tx (
       .clk_i(clk),
-      .start_i(data_ready),
-      .tx_buf_i(data_buf),
+      .start_i(tx_start),
+      .tx_buf_i(hold_buf),
+      .tx_ready_o(tx_ready),
       .tx_o(uart_rx_o)
   );
 

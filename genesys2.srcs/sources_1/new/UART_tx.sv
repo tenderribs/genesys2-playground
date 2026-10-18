@@ -1,12 +1,12 @@
 module UART_tx #(
-    parameter int SYSCLK_F = 200_000_000,
-    parameter int BAUDRATE = 115200
+    parameter int SYSCLK_F,
+    parameter int BAUDRATE
 ) (
     input logic clk_i,
     input logic start_i,
     input logic [7:0] tx_buf_i,
     output logic tx_o,
-    output logic done_o
+    output logic tx_ready_o
 );
 
   localparam int CycPerBit = SYSCLK_F / BAUDRATE;
@@ -15,70 +15,57 @@ module UART_tx #(
     IDLE,
     START,
     DATA,
-    STOP,
-    CLEANUP
+    STOP
   } state_t;
-
   state_t state = IDLE;
+
+  logic baud_tick;
   logic [$clog2(CycPerBit+1)-1:0] cyc_cnt = '0;  // number of cycles spend in state
   logic [7:0] buf_idx = '0;  // idx of bit in tx_buf to put on the line
+  logic [7:0] tx_buf = '0;  // local clone of tx buffer
+
+  assign tx_ready_o = (state == IDLE);
+  assign baud_tick  = (cyc_cnt == CycPerBit - 1);
 
   always_ff @(posedge clk_i) begin
+    // generate FSM ticks
+    if (state == IDLE | baud_tick) cyc_cnt <= '0;
+    else cyc_cnt <= cyc_cnt + 1;
+
     case (state)
       IDLE: begin
         tx_o <= '1;
-        done_o <= '0;
-        cyc_cnt <= '0;
-        buf_idx <= '0;
 
         if (start_i) begin
-          cyc_cnt <= '0;
-          state   <= START;
+          state  <= START;
+          tx_buf <= tx_buf_i;  // sample and save tx buffer input
         end
       end
-
       START: begin
-        if (cyc_cnt < CycPerBit) begin
-          tx_o <= '0;
-          cyc_cnt <= cyc_cnt + 1;
-        end else begin
-          cyc_cnt <= 0;
+        tx_o <= '0;  // drive line low
+
+        if (baud_tick) begin
+          buf_idx <= '0;
           state   <= DATA;
         end
       end
-
       DATA: begin
-        if (buf_idx < 8) begin
-          if (cyc_cnt < CycPerBit) begin
-            tx_o <= tx_buf_i[buf_idx];
-            cyc_cnt <= cyc_cnt + 1;
-          end else begin
-            cyc_cnt <= '0;
-            buf_idx <= buf_idx + 1;
-          end
-        end else begin
-          cyc_cnt <= 0;
-          state   <= STOP;
+        tx_o <= tx_buf[buf_idx];
+
+        if (baud_tick) begin
+          buf_idx <= buf_idx + 1;
+
+          if (buf_idx == 7) state <= STOP;
         end
       end
-
       STOP: begin
-        if (cyc_cnt < CycPerBit) begin
-          tx_o <= '1;
-          cyc_cnt <= cyc_cnt + 1;
-        end else begin
-          state <= CLEANUP;
+        tx_o <= '1;
+
+        if (baud_tick) begin
+          state <= IDLE;
         end
       end
-
-      CLEANUP: begin
-        done_o <= '1;
-        state  <= IDLE;
-      end
-
-      default: begin
-        state <= IDLE;
-      end
+      default: state <= IDLE;
     endcase
   end
 endmodule
