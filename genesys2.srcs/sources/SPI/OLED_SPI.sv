@@ -25,7 +25,9 @@ module OLED_SPI #(
   state_t state = PWR_VDD;
 
   logic [7:0] spi_data = '0;
-  logic spi_valid, spi_ready;
+  logic spi_ready;
+  logic spi_valid = '0;
+  logic spi_last_sent = '0;  // last byte handed to shifter, wait for it to finish
 
   SPI_shifter #(
       .SysClkF(SysClkF),
@@ -98,18 +100,22 @@ module OLED_SPI #(
         // 3. send initialization / configuration commands
         dc_o <= '0;  // data <= 1, cmd <= 0
 
-        // start new SPI logic [7:0] transfer
-        spi_data <= InitCmds[init_cmd_idx];
-        spi_valid <= '1;
+        if (!spi_last_sent) begin
+          // offer the next command byte to the shifter
+          spi_data  <= InitCmds[init_cmd_idx];
+          spi_valid <= '1;
 
-        if (spi_valid && spi_ready) begin
-          if (init_cmd_idx == NumCmds - 1) begin
-            state  <= PWR_VBAT;
-            ms_ctr <= '0;
-          end else begin
-            init_cmd_idx <= init_cmd_idx + 1;
+          if (spi_valid && spi_ready) begin  // handshake: shifter took the byte
             spi_valid <= '0;
+
+            if (init_cmd_idx == NumCmds - 1) spi_last_sent <= '1;
+            else init_cmd_idx <= init_cmd_idx + 1;
           end
+        end else if (spi_ready && !spi_valid) begin
+          // shifter idle and nothing pending => last byte fully clocked out
+          spi_last_sent <= '0;
+          state <= PWR_VBAT;
+          ms_ctr <= '0;
         end
       end
       PWR_VBAT: begin
@@ -125,20 +131,23 @@ module OLED_SPI #(
         // 5. Clear screen by writing zero to the display buffer.
         dc_o <= '1;  // data <= 1, cmd <= 0
 
-        // write zero logic [7:0]s to display
-        spi_data <= '0;
-        disp_buf[disp_buf_idx] <= '0;
-        spi_valid <= '1;
+        if (!spi_last_sent) begin
+          // write zero bytes to display
+          spi_data <= '0;
+          disp_buf[disp_buf_idx] <= '0;
+          spi_valid <= '1;
 
-        if (spi_valid && spi_ready) begin
-
-          if (disp_buf_idx == NumRows * NumCols - 1) begin
-            state <= DISP_ON;
-            disp_buf_idx <= '0;
-          end else begin
-            disp_buf_idx <= disp_buf_idx + 1;
+          if (spi_valid && spi_ready) begin  // handshake: shifter took the byte
             spi_valid <= '0;
+
+            if (disp_buf_idx == NumRows * NumCols - 1) spi_last_sent <= '1;
+            else disp_buf_idx <= disp_buf_idx + 1;
           end
+        end else if (spi_ready && !spi_valid) begin
+          // shifter idle and nothing pending => last byte fully clocked out
+          spi_last_sent <= '0;
+          state <= DISP_ON;
+          disp_buf_idx <= '0;
         end
       end
       DISP_ON: begin
