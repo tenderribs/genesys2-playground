@@ -14,5 +14,6 @@
     "verilog.linting.linter": "xvlog",
     "verilog.linting.path": "/tools/Xilinx/2026.1/Vivado/bin",
     "verilog.languageServer.veribleVerilogLs.enabled": true,
-    "verilog.languageServer.veribleVerilogLs.path": "/home/mark/.local/bin/verible-verilog-ls"
+    "verilog.languageServer.veribleVerilogLs.path": "/home/mark/.local/bin/verible-verilog-ls",
+    "vim.useSystemClipboard": true
 }

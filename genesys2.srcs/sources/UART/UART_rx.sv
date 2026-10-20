@@ -1,9 +1,10 @@
+`default_nettype none
 module UART_rx #(
     parameter int SysClkF,
     parameter int BAUDRATE
 ) (
-    input logic clk_i,
-    input logic rx_raw_i,
+    input wire logic clk_i,
+    input wire logic rx_raw_i,
     output logic [7:0] rx_buf_o,
     output logic done_o
 );
@@ -76,3 +77,4 @@ module UART_rx #(
 
   end
 endmodule
+`default_nettype wire

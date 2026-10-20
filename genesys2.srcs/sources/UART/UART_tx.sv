@@ -1,10 +1,12 @@
+`default_nettype none
+
 module UART_tx #(
     parameter int SysClkF,
     parameter int BAUDRATE
 ) (
-    input logic clk_i,
-    input logic start_i,
-    input logic [7:0] tx_buf_i,
+    input wire logic clk_i,
+    input wire logic start_i,
+    input wire logic [7:0] tx_buf_i,
     output logic tx_o,
     output logic tx_ready_o
 );
@@ -69,3 +71,4 @@ module UART_tx #(
     endcase
   end
 endmodule
+`default_nettype wire
