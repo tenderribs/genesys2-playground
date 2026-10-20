@@ -1,5 +1,5 @@
 module UART_tx #(
-    parameter int SYSCLK_F,
+    parameter int SysClkF,
     parameter int BAUDRATE
 ) (
     input logic clk_i,
@@ -9,7 +9,7 @@ module UART_tx #(
     output logic tx_ready_o
 );
 
-  localparam int CycPerBit = SYSCLK_F / BAUDRATE;
+  localparam int CycPerBit = SysClkF / BAUDRATE;
 
   typedef enum {
     IDLE,

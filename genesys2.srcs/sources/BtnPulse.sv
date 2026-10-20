@@ -1,11 +1,11 @@
 module BtnPulse #(
-    parameter int SYSCLK_F = 200_000_000
+    parameter int SysClkF = 200_000_000
 ) (
     input  logic clk_i,
     input  logic btn_i,
     output logic pulse_o
 );
-  localparam int DbncCycles = SYSCLK_F * 10e-3;  // 10 ms debounce
+  localparam int DbncCycles = SysClkF * 10e-3;  // 10 ms debounce
 
   // debounced one-shot push button circuit
   logic [1:0] btn_sync = '0;

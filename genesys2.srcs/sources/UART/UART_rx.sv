@@ -1,5 +1,5 @@
 module UART_rx #(
-    parameter int SYSCLK_F,
+    parameter int SysClkF,
     parameter int BAUDRATE
 ) (
     input logic clk_i,
@@ -8,7 +8,7 @@ module UART_rx #(
     output logic done_o
 );
 
-  localparam int ClkPerBaud = SYSCLK_F / BAUDRATE;
+  localparam int ClkPerBaud = SysClkF / BAUDRATE;
   localparam int ClkPerHalfBaud = ClkPerBaud / 2;
 
   typedef enum {
