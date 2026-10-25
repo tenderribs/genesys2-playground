@@ -22,13 +22,13 @@ module UART_tx #(
   } state_t;
   state_t State, State_P;
 
-  logic BaudTick;
+  logic BaudTick_S;
   logic [$clog2(CycPerBit+1)-1:0] CycCnt_D, CycCnt_DP;  // number of cycles spend in State
   logic [7:0] BufIdx_D, BufIdx_DP;  // idx of bit in TxBuf_D to put on the line
   logic [7:0] TxBuf_D, TxBuf_DP;  // local clone of tx buffer
 
   assign TxReady_SO = (State_P == IDLE);
-  assign BaudTick   = (CycCnt_DP == CycPerBit - 1);
+  assign BaudTick_S = (CycCnt_DP == CycPerBit - 1);
 
   always_ff @(posedge ClkSrc_CI, negedge Rst_SIN) begin
     if (~Rst_SIN) begin
@@ -51,7 +51,7 @@ module UART_tx #(
     TxBuf_D = TxBuf_DP;
 
     // generate FSM ticks
-    if (State_P == IDLE | BaudTick) CycCnt_D = '0;
+    if (State_P == IDLE | BaudTick_S) CycCnt_D = '0;
     else CycCnt_D = CycCnt_DP + 1;
 
     case (State_P)
@@ -66,7 +66,7 @@ module UART_tx #(
       START: begin
         Tx_SO = '0;  // drive line low
 
-        if (BaudTick) begin
+        if (BaudTick_S) begin
           BufIdx_D = '0;
           State = DATA;
         end
@@ -74,7 +74,7 @@ module UART_tx #(
       DATA: begin
         Tx_SO = TxBuf_DP[BufIdx_DP];
 
-        if (BaudTick) begin
+        if (BaudTick_S) begin
           BufIdx_D = BufIdx_DP + 1;
 
           if (BufIdx_DP == 7) State = STOP;
@@ -83,7 +83,7 @@ module UART_tx #(
       STOP: begin
         Tx_SO = '1;
 
-        if (BaudTick) begin
+        if (BaudTick_S) begin
           State = IDLE;
         end
       end

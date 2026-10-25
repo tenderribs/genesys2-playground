@@ -57,6 +57,7 @@ module top (
       .SysClkF (SysClkF),
       .BaudRate(BaudRate)
   ) uart_rx (
+      .Rst_SIN (Rst_SIN),
       .Clk_CI  (clk),
       .RxRaw_SI(uart_tx_i),
       .RxBuf_DO(data_buf),
