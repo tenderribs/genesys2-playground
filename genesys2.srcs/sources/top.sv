@@ -54,10 +54,10 @@ module top (
       .SysClkF (SysClkF),
       .BAUDRATE(BaudRate)
   ) uart_rx (
-      .clk_i(clk),
-      .rx_raw_i(uart_tx_i),
-      .rx_buf_o(data_buf),
-      .done_o(rx_done)
+      .Clk_CI  (clk),
+      .RxRaw_SI(uart_tx_i),
+      .RxBuf_DO(data_buf),
+      .Done_SO (rx_done)
   );
 
   // put RX buf into holding buf while TX busy
@@ -76,11 +76,11 @@ module top (
       .SysClkF (SysClkF),
       .BAUDRATE(BaudRate)
   ) uart_tx (
-      .clk_i(clk),
-      .start_i(tx_start),
-      .tx_buf_i(hold_buf),
-      .tx_ready_o(tx_ready),
-      .tx_o(uart_rx_o)
+      .ClkSrc_CI(clk),
+      .Start_SI(tx_start),
+      .TxBuf_DI(hold_buf),
+      .Tx_SO(tx_ready),
+      .TxReady_SO(uart_rx_o)
   );
 
   assign led_o[1] = btnc;
