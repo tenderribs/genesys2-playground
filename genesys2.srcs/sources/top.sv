@@ -34,6 +34,9 @@ module top (
       .O (clk)
   );
 
+  logic Rst_SIN = '0;
+  always_ff @(posedge clk) Rst_SIN <= '1;  // low for the first cycle, then released
+
   // LED for debugging
   Blinky blinky (
       .clk_i(clk),
@@ -52,7 +55,7 @@ module top (
   // PC -> FPGA
   UART_rx #(
       .SysClkF (SysClkF),
-      .BAUDRATE(BaudRate)
+      .BaudRate(BaudRate)
   ) uart_rx (
       .Clk_CI  (clk),
       .RxRaw_SI(uart_tx_i),
@@ -74,13 +77,14 @@ module top (
   // FPGA -> PC
   UART_tx #(
       .SysClkF (SysClkF),
-      .BAUDRATE(BaudRate)
+      .BaudRate(BaudRate)
   ) uart_tx (
+      .Rst_SIN(Rst_SIN),
       .ClkSrc_CI(clk),
       .Start_SI(tx_start),
       .TxBuf_DI(hold_buf),
-      .Tx_SO(tx_ready),
-      .TxReady_SO(uart_rx_o)
+      .Tx_SO(uart_rx_o),
+      .TxReady_SO(tx_ready)
   );
 
   assign led_o[1] = btnc;

@@ -2,8 +2,9 @@
 
 module UART_tx #(
     parameter int SysClkF,
-    parameter int BAUDRATE
+    parameter int BaudRate
 ) (
+    input wire logic Rst_SIN,
     input wire logic ClkSrc_CI,
     input wire logic Start_SI,
     input wire logic [7:0] TxBuf_DI,
@@ -11,7 +12,7 @@ module UART_tx #(
     output logic TxReady_SO
 );
 
-  localparam int CycPerBit = SysClkF / BAUDRATE;
+  localparam int CycPerBit = SysClkF / BaudRate;
 
   typedef enum {
     IDLE,
@@ -19,55 +20,74 @@ module UART_tx #(
     DATA,
     STOP
   } state_t;
-  state_t state_;
+  state_t State, State_P;
 
-  logic BaudTick_D;
-  logic [$clog2(CycPerBit+1)-1:0] CycCnt_D = '0;  // number of cycles spend in State
-  logic [7:0] BufIdx_D = '0;  // idx of bit in TxBuf_D to put on the line
-  logic [7:0] TxBuf_D = '0;  // local clone of tx buffer
+  logic BaudTick;
+  logic [$clog2(CycPerBit+1)-1:0] CycCnt_D, CycCnt_DP;  // number of cycles spend in State
+  logic [7:0] BufIdx_D, BufIdx_DP;  // idx of bit in TxBuf_D to put on the line
+  logic [7:0] TxBuf_D, TxBuf_DP;  // local clone of tx buffer
 
-  assign TxReady_SO = (State == IDLE);
-  assign BaudTick_D = (CycCnt_D == CycPerBit - 1);
+  assign TxReady_SO = (State_P == IDLE);
+  assign BaudTick   = (CycCnt_DP == CycPerBit - 1);
 
-  always_ff @(posedge ClkSrc_CI) begin
+  always_ff @(posedge ClkSrc_CI, negedge Rst_SIN) begin
+    if (~Rst_SIN) begin
+      State_P   <= IDLE;
+      CycCnt_DP <= '0;
+      BufIdx_DP <= '0;
+      TxBuf_DP  <= '0;
+    end else begin
+      State_P   <= State;
+      CycCnt_DP <= CycCnt_D;
+      BufIdx_DP <= BufIdx_D;
+      TxBuf_DP  <= TxBuf_D;
+    end
+  end
+
+  always_comb begin
+    State = State_P;
+    CycCnt_D = CycCnt_DP;
+    BufIdx_D = BufIdx_DP;
+    TxBuf_D = TxBuf_DP;
+
     // generate FSM ticks
-    if (State == IDLE | BaudTick_D) CycCnt_D <= '0;
-    else CycCnt_D <= CycCnt_D + 1;
+    if (State_P == IDLE | BaudTick) CycCnt_D = '0;
+    else CycCnt_D = CycCnt_DP + 1;
 
-    case (State)
+    case (State_P)
       IDLE: begin
-        Tx_SO <= '1;
+        Tx_SO = 1;
 
         if (Start_SI) begin
-          State   <= START;
-          TxBuf_D <= TxBuf_DI;  // sample and save tx buffer input
+          State   = START;
+          TxBuf_D = TxBuf_DI;  // sample and save tx buffer input
         end
       end
       START: begin
-        Tx_SO <= '0;  // drive line low
+        Tx_SO = '0;  // drive line low
 
-        if (BaudTick_D) begin
-          BufIdx_D <= '0;
-          State <= DATA;
+        if (BaudTick) begin
+          BufIdx_D = '0;
+          State = DATA;
         end
       end
       DATA: begin
-        Tx_SO <= TxBuf_D[BufIdx_D];
+        Tx_SO = TxBuf_DP[BufIdx_DP];
 
-        if (BaudTick_D) begin
-          BufIdx_D <= BufIdx_D + 1;
+        if (BaudTick) begin
+          BufIdx_D = BufIdx_DP + 1;
 
-          if (BufIdx_D == 7) State <= STOP;
+          if (BufIdx_DP == 7) State = STOP;
         end
       end
       STOP: begin
-        Tx_SO <= '1;
+        Tx_SO = '1;
 
-        if (BaudTick_D) begin
-          State <= IDLE;
+        if (BaudTick) begin
+          State = IDLE;
         end
       end
-      default: State <= IDLE;
+      default: State = IDLE;
     endcase
   end
 endmodule
