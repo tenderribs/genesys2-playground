@@ -65,3 +65,5 @@ xvlog.*
 *.dcp
 ## standalone simulation output
 sim/build/
+
+.vscode

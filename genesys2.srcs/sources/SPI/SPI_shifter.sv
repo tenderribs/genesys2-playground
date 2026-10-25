@@ -5,61 +5,74 @@ module SPI_shifter #(
     parameter int SysClkF,
     parameter int SpiClkF
 ) (
-    input wire logic clk_i,  // FPGA system clock
-    input wire logic [7:0] data_i,
-    input wire logic valid_i,
-    output logic sclk_o,  // SPI clock
-    output logic sdin_o,  // SPI data out
-    output logic ready_o
+    input wire logic Rst_SIN,
+    input wire logic Clk_CI,  // FPGA system clock
+    input wire logic [7:0] Data_DI,
+    input wire logic Valid_SI,
+    output logic Sclk_SO,  // SPI clock
+    output logic Sdin_SO,  // SPI data out
+    output logic Ready_SO
 );
 
   localparam int ClkPerSclk = SysClkF / SpiClkF;
   localparam int HalfClkPerSclk = ClkPerSclk / 2;
 
-  logic [$clog2(ClkPerSclk + 1)-1:0] sclk_sysclk_cnt = '0;
-
-  logic [7:0] data_buf = '0;
-  logic [2:0] bit_idx = '0;
+  logic [$clog2(ClkPerSclk + 1)-1:0] SysClkCnt_D, SysClkCnt_DP;
+  logic [7:0] DataBuf_D, DataBuf_DP;
+  logic [2:0] BitIdx_D, BitIdx_DP;
 
   typedef enum {
     IDLE,
     SHIFT
   } state_t;
-  state_t state = IDLE;
+  state_t State, State_P;
 
-  assign ready_o = (state == IDLE);
+  assign Ready_SO = (State_P == IDLE);
 
-  always_ff @(posedge clk_i) begin
-    case (state)
+  always_ff @(posedge Clk_CI, negedge Rst_SIN) begin
+    if (~Rst_SIN) begin
+      SysClkCnt_DP <= SysClkCnt_D;
+      DataBuf_DP <= DataBuf_D;
+      BitIdx_DP <= BitIdx_D;
+    end else begin
+      SysClkCnt_DP <= '0;
+      DataBuf_DP <= '0;
+      BitIdx_DP <= '0;
+    end
+  end
+
+  always_comb begin
+    SysClkCnt_D = SysClkCnt_DP;
+    DataBuf_D = DataBuf_DP;
+    BitIdx_D = BitIdx_DP;
+
+    case (State_P)
       IDLE: begin
-        if (ready_o && valid_i) begin
+        if (Ready_SO && Valid_SI) begin
           // sample data bytes and move to next state
-          data_buf <= data_i;
-          state <= SHIFT;
+          DataBuf_D = Data_DI;
 
-          // reset all
-          bit_idx <= '0;
-          sclk_sysclk_cnt <= '0;
+          State = SHIFT;
+          BitIdx_D = '0;
+          SysClkCnt_D = '0;
         end
       end
       SHIFT: begin
         // data sent on the falling sclk edge
-        sclk_o <= (sclk_sysclk_cnt > HalfClkPerSclk - 1);
-        sdin_o <= data_buf[7-bit_idx];  // MSB first
+        Sclk_SO = (SysClkCnt_DP > HalfClkPerSclk - 1);
+        Sdin_SO = DataBuf_DP[7-BitIdx_DP];  // MSB first
 
         // increment bit idx on sclk counter rollover
-        if (sclk_sysclk_cnt == ClkPerSclk - 1) begin
-          sclk_sysclk_cnt <= '0;
-          bit_idx <= bit_idx + 1;
+        if (SysClkCnt_DP == ClkPerSclk - 1) begin
+          if (BitIdx_DP == 7) State = IDLE;
 
-          if (bit_idx == 7) begin
-            state <= IDLE;
-          end
+          BitIdx_D = BitIdx_DP + 1;
+          SysClkCnt_D = '0;
         end else begin
-          sclk_sysclk_cnt <= sclk_sysclk_cnt + 1;
+          SysClkCnt_D = SysClkCnt_DP + 1;
         end
       end
-      default: state <= IDLE;
+      default: State = IDLE;
     endcase
   end
 endmodule

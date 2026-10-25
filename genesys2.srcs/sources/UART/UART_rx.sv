@@ -1,15 +1,16 @@
 `default_nettype none
 module UART_rx #(
     parameter int SysClkF,
-    parameter int BAUDRATE
+    parameter int BaudRate
 ) (
-    input wire logic clk_i,
-    input wire logic rx_raw_i,
-    output logic [7:0] rx_buf_o,
-    output logic done_o
+    input wire logic Rst_SIN,
+    input wire logic Clk_CI,
+    input wire logic RxRaw_SI,
+    output logic [7:0] RxBuf_DO,
+    output logic Done_SO
 );
 
-  localparam int ClkPerBaud = SysClkF / BAUDRATE;
+  localparam int ClkPerBaud = SysClkF / BaudRate;
   localparam int ClkPerHalfBaud = ClkPerBaud / 2;
 
   typedef enum {
@@ -18,63 +19,74 @@ module UART_rx #(
     SAMPLING,
     OUTPUT
   } state_t;
-  state_t state = IDLE;
+  state_t State, State_P;
 
-  logic baud_tick, half_baud_tick;
-  logic [$clog2(ClkPerBaud+1)-1:0] cyc_cnt = '0;  // space to count cycles through two bauds
+  logic BaudTick_S, HalfBaudTick_S;
+  logic [$clog2(ClkPerBaud+1)-1:0] CycCnt_D, CycCnt_DP;  // space to count cycles through two bauds
 
-  logic [1:0] rx_sync_buf = '1;
-  logic [$clog2(8+1)-1:0] buf_idx = '0;
+  logic [1:0] RxSyncBuf_D, RxSyncBuf_DP;
+  logic [$clog2(8+1)-1:0] BufIdx_D, BufIdx_DP;
+  logic RxSync_S;
 
-  logic rx_sync;
-  assign rx_sync = rx_sync_buf[1];
 
-  assign half_baud_tick = (cyc_cnt == ClkPerHalfBaud - 1);
-  assign baud_tick = (cyc_cnt == ClkPerBaud - 1);
+  always_ff @(posedge Clk_CI, negedge Rst_SIN) begin
+    if (~Rst_SIN) begin
+      State_P <= IDLE;
+      RxSyncBuf_DP <= '1;  // init val 1 because UART line active low
+      BufIdx_DP <= '0;
+      CycCnt_DP <= '0;
+    end else begin
+      State_P <= State;
+      RxSyncBuf_DP <= RxSyncBuf_D;
+      BufIdx_DP <= BufIdx_D;
+      CycCnt_DP <= CycCnt_D;
+    end
+  end
 
-  always_ff @(posedge clk_i) begin
-    // 2-FF synchronizer
-    rx_sync_buf <= {rx_sync_buf[0], rx_raw_i};
+  assign RxSync_S = RxSyncBuf_DP[1];
+  assign BaudTick_S = (CycCnt_DP == ClkPerBaud - 1);
+  assign HalfBaudTick_S = (CycCnt_DP == ClkPerHalfBaud - 1);
+
+  always_comb begin
+    State = State_P;
+    RxSyncBuf_D = {RxSyncBuf_DP[0], RxRaw_SI};
+    BufIdx_D = BufIdx_DP;
 
     // generate FSM ticks
-    if (state == IDLE | baud_tick) cyc_cnt <= '0;
-    else cyc_cnt <= cyc_cnt + 1;
+    if (State_P == IDLE | BaudTick_S) CycCnt_D = '0;
+    else CycCnt_D = CycCnt_DP + 1;
 
-    case (state)
+    case (State_P)
       IDLE: begin
-        done_o <= '0;
-        if (~rx_sync) begin  // TX started
-          state <= START;
+        Done_SO = '0;
+        if (~RxSync_S) begin  // TX started
+          State = START;
         end
       end
       START: begin
-        if (half_baud_tick) begin
-          if (~rx_sync) begin  // confirm is real TX start
-            buf_idx <= '0;
-            state   <= SAMPLING;
-          end else state <= IDLE;
+        if (HalfBaudTick_S) begin
+          if (~RxSync_S) begin  // confirm is real TX start
+            BufIdx_D = '0;
+            State = SAMPLING;
+          end else State = IDLE;
         end
       end
       SAMPLING: begin
-        if (half_baud_tick) begin  // sample the line in the middle
-          rx_buf_o[buf_idx] <= rx_sync;
+        if (HalfBaudTick_S) begin  // sample the line in the middle
+          if (BufIdx_DP == 7) State = OUTPUT;
 
-          buf_idx <= buf_idx + 1;
-
-          if (buf_idx == 7) begin
-            state <= OUTPUT;
-          end
+          RxBuf_DO[BufIdx_DP] = RxSync_S;
+          BufIdx_D = BufIdx_DP + 1;
         end
       end
       OUTPUT: begin
-        if (half_baud_tick) begin
-          done_o <= rx_sync;
-          state  <= IDLE;
+        if (HalfBaudTick_S) begin
+          Done_SO = RxSync_S;
+          State   = IDLE;
         end
       end
-      default: state <= IDLE;
+      default: State = IDLE;
     endcase
-
   end
 endmodule
 `default_nettype wire
