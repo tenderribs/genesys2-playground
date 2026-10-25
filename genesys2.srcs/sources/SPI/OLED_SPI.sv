@@ -3,55 +3,17 @@
 module OLED_SPI #(
     parameter int SysClkF
 ) (
-    input wire logic clk_i,
-    output logic dc_o,  // data => 1, cmd => 0
-    output logic res_no,
-    output logic sclk_o,
-    output logic sdin_o,
-    output logic vbat_o,
-    output logic vdd_o
+    input wire logic Rst_SIN,
+    input wire logic Clk_CI,
+    output logic Dc_SO,  // data => 1, cmd => 0
+    output logic Rst_SON,
+    output logic Sclk_SO,
+    output logic Sdin_SO,
+    output logic VBat_SON,
+    output logic Vdd_SO
 );
 
   localparam int ClkPerMs = SysClkF / 1000;
-
-  typedef enum {
-    PWR_VDD,
-    RESET,
-    INIT,
-    PWR_VBAT,
-    CLEAR,
-    DISP_ON
-  } state_t;
-  state_t state = PWR_VDD;
-
-  logic [7:0] spi_data = '0;
-  logic spi_ready;
-  logic spi_valid = '0;
-  logic spi_last_sent = '0;  // last byte handed to shifter, wait for it to finish
-
-  SPI_shifter #(
-      .SysClkF(SysClkF),
-      .SpiClkF(10_000_000)
-  ) spi_shifter (
-      .clk_i  (clk_i),
-      .data_i (spi_data),
-      .valid_i(spi_valid),
-      .sclk_o (sclk_o),
-      .sdin_o (sdin_o),
-      .ready_o(spi_ready)
-  );
-
-  // generate pulse every ms with counter
-  logic [$clog2(ClkPerMs+1)-1:0] ms_sysclk_cnt = '0;
-  logic [$clog2(100+1)-1:0] ms_ctr = '0;  // count ms pulse up to 100ms
-
-  // pulse every ms
-  logic ms_tick;
-  assign ms_tick = (ms_sysclk_cnt == (ClkPerMs - 1));
-  always_ff @(posedge clk_i) begin
-    if (ms_sysclk_cnt == ClkPerMs - 1) ms_sysclk_cnt <= '0;
-    else ms_sysclk_cnt <= ms_sysclk_cnt + 1;
-  end
 
   localparam int NumCmds = 12;
   localparam logic [7:0] InitCmds[NumCmds] = '{
@@ -68,93 +30,153 @@ module OLED_SPI #(
       8'h20,
       8'h00  // Addressing mode: horizontal
   };
-  logic [$clog2(NumCmds+1)-1:0] init_cmd_idx = '0;
 
   localparam int NumCols = 128;
   localparam int NumRows = 32;
-  logic [$clog2(NumCols+1)-1:0] col_idx = '0;
-  logic [$clog2(NumRows+1)-1:0] row_idx = '0;
-  logic [$clog2(NumCols*NumRows+1)-1:0] disp_buf_idx = '0;
-  logic [7:0] disp_buf[NumCols*NumRows];
 
-  always_ff @(posedge clk_i) begin
-    vdd_o  <= '0;
-    res_no <= !(state == RESET);
-    vbat_o <= state inside {PWR_VDD, RESET, INIT};  // active low
-    dc_o   <= '1;
+  typedef enum {
+    PWR_VDD,
+    RESET,
+    INIT,
+    PWR_VBAT,
+    CLEAR,
+    DISP_ON
+  } state_t;
+  state_t State, State_P;
+
+  logic SpiReady_S, SpiValid_S, SpiValid_SP;
+  logic SpiLastSent_S, SpiLastSent_SP;  // last byte handed to shifter, wait for it to finish
+  logic [7:0] SpiData_D;
+
+  // generate pulse every ms with counter
+  logic MsTick_S;  // pulse every ms
+  logic [$clog2(ClkPerMs+1)-1:0] MsSysClkCnt_D, MsSysClkCnt_DP;
+  logic [$clog2(100+1)-1:0] MsCtr_D, MsCtr_DP;  // count ms pulse up to 100ms
+
+  // Initialization command to send
+  logic [$clog2(NumCmds+1)-1:0] InitCmdIdx_D, InitCmdIdx_DP;
+
+  // Display buffer contents
+  logic [$clog2(NumCols*NumRows+1)-1:0] DispBufIdx_D, DispBufIdx_DP;
+  logic [NumCols*NumRows-1:0] DispBuf_D;
+  // logic [$clog2(NumCols+1)-1:0] ColIdx_D, ColIdx_DP;
+  // logic [$clog2(NumRows+1)-1:0] RowIdx_D, RowIdx_DP;
+
+  SPI_shifter #(
+      .SysClkF(SysClkF),
+      .SpiClkF(10_000_000)
+  ) spi_shifter (
+      .Rst_SIN (Rst_SIN),
+      .Clk_CI  (Clk_CI),
+      .Data_DI (SpiData_D),
+      .Valid_SI(SpiValid_S),
+      .Sclk_SO (Sclk_SO),
+      .Sdin_SO (Sdin_SO),
+      .Ready_SO(SpiReady_S)
+  );
+
+  always_ff @(posedge Clk_CI, negedge Rst_SIN) begin
+    if (~Rst_SIN) begin
+      MsSysClkCnt_DP <= '0;
+      MsCtr_DP <= '0;
+      InitCmdIdx_DP <= '0;
+      DispBufIdx_DP <= '0;
+      SpiLastSent_SP <= '0;
+    end else begin
+      MsSysClkCnt_DP <= MsSysClkCnt_D;
+      MsCtr_DP <= MsCtr_D;
+      InitCmdIdx_DP <= InitCmdIdx_D;
+      DispBufIdx_DP <= DispBufIdx_D;
+      SpiLastSent_SP <= SpiLastSent_S;
+    end
+  end
+
+  always_comb begin
+    MsCtr_D = MsCtr_DP;
+    InitCmdIdx_D = InitCmdIdx_DP;
+    DispBufIdx_D = DispBufIdx_DP;
+    SpiLastSent_S = SpiLastSent_SP;
+    SpiValid_S = SpiValid_SP;
+
+    if (MsSysClkCnt_DP == ClkPerMs - 1) MsSysClkCnt_D = '0;
+    else MsSysClkCnt_D = MsSysClkCnt_DP + 1;
+
+    MsTick_S = (MsSysClkCnt_DP == (ClkPerMs - 1));
+
+    Dc_SO = '1;
+    Vdd_SO = '0;
+    Rst_SON = !(State_P == RESET);
+    VBat_SON = State_P inside {PWR_VDD, RESET, INIT};
 
     // https://digilent.com/reference/programmable-logic/genesys-2/reference-manual#oled
-    case (state)
+    case (State_P)
       PWR_VDD: begin
         // 1. power up VDD by pulling OLED_VDD low. Wait 1ms
-        if (ms_tick) state <= RESET;
+        if (MsTick_S) State = RESET;
       end
       RESET: begin
-        // 2. pulse RES# low for at least 3us (so wait 1ms)
-        if (ms_tick) begin
-          state <= INIT;
-          init_cmd_idx <= '0;
-        end
+        // 2. pulse RES# low for at least 3us
+        if (MsTick_S) State = INIT;
       end
       INIT: begin
         // 3. send initialization / configuration commands
-        dc_o <= '0;  // data <= 1, cmd <= 0
+        Dc_SO = '0;  // data <= 1, cmd <= 0
 
-        if (!spi_last_sent) begin
+        if (!SpiLastSent_SP) begin
           // offer the next command byte to the shifter
-          spi_data  <= InitCmds[init_cmd_idx];
-          spi_valid <= '1;
+          SpiData_D  = InitCmds[InitCmdIdx_DP];
+          SpiValid_S = '1;
 
-          if (spi_valid && spi_ready) begin  // handshake: shifter took the byte
-            spi_valid <= '0;
+          if (SpiValid_SP && SpiReady_S) begin  // handshake: shifter took the byte
+            SpiValid_S = '0;
 
-            if (init_cmd_idx == NumCmds - 1) spi_last_sent <= '1;
-            else init_cmd_idx <= init_cmd_idx + 1;
+            if (InitCmdIdx_DP == NumCmds - 1) SpiLastSent_S = '1;
+            else InitCmdIdx_D = InitCmdIdx_DP + 1;
           end
-        end else if (spi_ready && !spi_valid) begin
+        end else if (SpiReady_S && !SpiValid_SP) begin
           // shifter idle and nothing pending => last byte fully clocked out
-          spi_last_sent <= '0;
-          state <= PWR_VBAT;
-          ms_ctr <= '0;
+          SpiLastSent_S = '0;
+          State = PWR_VBAT;
+          MsCtr_D = '0;
         end
       end
       PWR_VBAT: begin
         // 4. Power up VBAT by pulling OLED_VBAT low. Wait 100ms for voltage to stabilize.
-        if (ms_tick) ms_ctr <= ms_ctr + 1;
+        if (MsTick_S) MsCtr_D = MsCtr_DP + 1;
 
-        if (ms_ctr == 100) begin
-          state <= CLEAR;
-          disp_buf_idx <= '0;
+        if (MsCtr_DP == 100) begin
+          State = CLEAR;
+          DispBufIdx_D = '0;
         end
       end
       CLEAR: begin
         // 5. Clear screen by writing zero to the display buffer.
-        dc_o <= '1;  // data <= 1, cmd <= 0
+        Dc_SO = '1;  // data <= 1, cmd <= 0
 
-        if (!spi_last_sent) begin
+        if (!SpiLastSent_SP) begin
           // write zero bytes to display
-          spi_data <= '0;
-          disp_buf[disp_buf_idx] <= '0;
-          spi_valid <= '1;
+          DispBuf_D[DispBufIdx_DP] = '0;
+          SpiData_D = '0;
+          SpiValid_S = '1;
 
-          if (spi_valid && spi_ready) begin  // handshake: shifter took the byte
-            spi_valid <= '0;
+          if (SpiValid_SP && SpiReady_S) begin  // handshake: shifter took the byte
+            SpiValid_S = '0;
 
-            if (disp_buf_idx == NumRows * NumCols - 1) spi_last_sent <= '1;
-            else disp_buf_idx <= disp_buf_idx + 1;
+            if (DispBufIdx_DP == NumRows * NumCols - 1) SpiLastSent_S = '1;
+            else DispBufIdx_D = DispBufIdx_DP + 1;
           end
-        end else if (spi_ready && !spi_valid) begin
+        end else if (SpiReady_S && !SpiValid_SP) begin
           // shifter idle and nothing pending => last byte fully clocked out
-          spi_last_sent <= '0;
-          state <= DISP_ON;
-          disp_buf_idx <= '0;
+          SpiLastSent_S = '0;
+          State = DISP_ON;
+          DispBufIdx_D = '0;
         end
       end
       DISP_ON: begin
         // TBD haven't gotten farther than this
-        dc_o <= '0;  // data <= 1, cmd <= 0
+        Dc_SO = '0;  // data <= 1, cmd <= 0
       end
-      default: state <= PWR_VDD;
+      default: State = PWR_VDD;
     endcase
   end
 endmodule

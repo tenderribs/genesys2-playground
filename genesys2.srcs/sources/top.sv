@@ -94,13 +94,14 @@ module top (
   OLED_SPI #(
       .SysClkF(SysClkF)
   ) oled_spi (
-      .clk_i (clk),
-      .dc_o  (oled_dc),
-      .res_no(oled_res),
-      .sclk_o(oled_sclk),
-      .sdin_o(oled_sdin),
-      .vbat_o(oled_vbat),
-      .vdd_o (oled_vdd)
+      .Rst_SIN(Rst_SIN),
+      .Clk_CI(clk),
+      .Dc_SO(oled_dc),
+      .Rst_SON(oled_res),
+      .Sclk_SO(oled_sclk),
+      .Sdin_SO(oled_sdin),
+      .VBat_SON(oled_vbat),
+      .Vdd_SO(oled_vdd)
   );
 endmodule
 `default_nettype wire
