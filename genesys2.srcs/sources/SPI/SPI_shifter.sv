@@ -21,30 +21,50 @@ module SPI_shifter #(
   logic [7:0] DataBuf_D, DataBuf_DP;
   logic [2:0] BitIdx_D, BitIdx_DP;
 
+  logic Sclk_S, Sclk_SP;
+  logic Sdin_S, Sdin_SP;
+
   typedef enum {
     IDLE,
     SHIFT
   } state_t;
   state_t State, State_P;
 
-  assign Ready_SO = (State_P == IDLE);
 
   always_ff @(posedge Clk_CI, negedge Rst_SIN) begin
     if (~Rst_SIN) begin
-      SysClkCnt_DP <= SysClkCnt_D;
-      DataBuf_DP <= DataBuf_D;
-      BitIdx_DP <= BitIdx_D;
-    end else begin
+      State_P <= IDLE;
+
       SysClkCnt_DP <= '0;
       DataBuf_DP <= '0;
       BitIdx_DP <= '0;
+
+      Sclk_SP <= '1;
+      Sdin_SP <= '1;
+    end else begin
+      State_P <= State;
+
+      SysClkCnt_DP <= SysClkCnt_D;
+      DataBuf_DP <= DataBuf_D;
+      BitIdx_DP <= BitIdx_D;
+
+      Sclk_SP <= Sclk_S;
+      Sdin_SP <= Sdin_S;
     end
   end
 
+  assign Sclk_SO = Sclk_SP;
+  assign Sdin_SO = Sdin_SP;
+  assign Ready_SO = (State_P == IDLE);
+
   always_comb begin
+    State = State_P;
     SysClkCnt_D = SysClkCnt_DP;
     DataBuf_D = DataBuf_DP;
     BitIdx_D = BitIdx_DP;
+
+    Sclk_S = Sclk_SP;
+    Sdin_S = Sdin_SP;
 
     case (State_P)
       IDLE: begin
@@ -59,8 +79,8 @@ module SPI_shifter #(
       end
       SHIFT: begin
         // data sent on the falling sclk edge
-        Sclk_SO = (SysClkCnt_DP > HalfClkPerSclk - 1);
-        Sdin_SO = DataBuf_DP[7-BitIdx_DP];  // MSB first
+        Sclk_S = (SysClkCnt_DP > HalfClkPerSclk - 1);
+        Sdin_S = DataBuf_DP[7-BitIdx_DP];  // MSB first
 
         // increment bit idx on sclk counter rollover
         if (SysClkCnt_DP == ClkPerSclk - 1) begin

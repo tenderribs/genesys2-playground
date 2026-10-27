@@ -40,27 +40,31 @@ module OLED_SPI #(
     INIT,
     PWR_VBAT,
     CLEAR,
-    DISP_ON
+    DISP_ON,
+    DONE
   } state_t;
   state_t State, State_P;
 
-  logic SpiReady_S, SpiValid_S, SpiValid_SP;
-  logic SpiLastSent_S, SpiLastSent_SP;  // last byte handed to shifter, wait for it to finish
-  logic [7:0] SpiData_D;
+  logic Dc_S, Dc_SP, Rst_SN, Rst_SPN, VBat_SN, VBat_SPN, Vdd_S, Vdd_SP;
 
   // generate pulse every ms with counter
   logic MsTick_S;  // pulse every ms
   logic [$clog2(ClkPerMs+1)-1:0] MsSysClkCnt_D, MsSysClkCnt_DP;
   logic [$clog2(100+1)-1:0] MsCtr_D, MsCtr_DP;  // count ms pulse up to 100ms
 
+  logic SpiReady_S, SpiValid_S, SpiValid_SP;
+  logic SpiLastSent_S, SpiLastSent_SP;  // last byte handed to shifter, wait for it to finish
+  logic [7:0] SpiData_D, SpiData_DP;
+
   // Initialization command to send
   logic [$clog2(NumCmds+1)-1:0] InitCmdIdx_D, InitCmdIdx_DP;
 
   // Display buffer contents
   logic [$clog2(NumCols*NumRows+1)-1:0] DispBufIdx_D, DispBufIdx_DP;
-  logic [NumCols*NumRows-1:0] DispBuf_D;
+  // logic [NumCols*NumRows-1:0] DispBuf_D;
   // logic [$clog2(NumCols+1)-1:0] ColIdx_D, ColIdx_DP;
   // logic [$clog2(NumRows+1)-1:0] RowIdx_D, RowIdx_DP;
+
 
   SPI_shifter #(
       .SysClkF(SysClkF),
@@ -68,8 +72,8 @@ module OLED_SPI #(
   ) spi_shifter (
       .Rst_SIN (Rst_SIN),
       .Clk_CI  (Clk_CI),
-      .Data_DI (SpiData_D),
-      .Valid_SI(SpiValid_S),
+      .Data_DI (SpiData_DP),
+      .Valid_SI(SpiValid_SP),
       .Sclk_SO (Sclk_SO),
       .Sdin_SO (Sdin_SO),
       .Ready_SO(SpiReady_S)
@@ -77,36 +81,66 @@ module OLED_SPI #(
 
   always_ff @(posedge Clk_CI, negedge Rst_SIN) begin
     if (~Rst_SIN) begin
+      State_P <= PWR_VDD;
+
+      Dc_SP <= '0;
+      Rst_SPN <= '1;
+      VBat_SPN <= '1;
+      Vdd_SP <= '1;
+
       MsSysClkCnt_DP <= '0;
       MsCtr_DP <= '0;
+
+      SpiValid_SP <= '0;
+      SpiData_DP <= '0;
+      SpiLastSent_SP <= '0;
+
       InitCmdIdx_DP <= '0;
       DispBufIdx_DP <= '0;
-      SpiLastSent_SP <= '0;
     end else begin
+      State_P <= State;
+
+      Dc_SP <= Dc_S;
+      Rst_SPN <= Rst_SN;
+      VBat_SPN <= VBat_SN;
+      Vdd_SP <= Vdd_S;
+
       MsSysClkCnt_DP <= MsSysClkCnt_D;
       MsCtr_DP <= MsCtr_D;
+
+      SpiValid_SP<= SpiValid_S;
+      SpiData_DP <= SpiData_D;
+      SpiLastSent_SP <= SpiLastSent_S;
+
       InitCmdIdx_DP <= InitCmdIdx_D;
       DispBufIdx_DP <= DispBufIdx_D;
-      SpiLastSent_SP <= SpiLastSent_S;
     end
   end
 
-  always_comb begin
-    MsCtr_D = MsCtr_DP;
-    InitCmdIdx_D = InitCmdIdx_DP;
-    DispBufIdx_D = DispBufIdx_DP;
-    SpiLastSent_S = SpiLastSent_SP;
-    SpiValid_S = SpiValid_SP;
+  assign Dc_SO = Dc_SP;
+  assign Rst_SON = Rst_SPN;
+  assign VBat_SON = VBat_SPN;
+  assign Vdd_SO = Vdd_SP;
 
+  always_comb begin
+    State = State_P;
+
+    Dc_S = '1;
+    Rst_SN = !(State_P == RESET);
+    VBat_SN = State_P inside {PWR_VDD, RESET, INIT};
+    Vdd_S = '0;
+
+    MsCtr_D = MsCtr_DP;
     if (MsSysClkCnt_DP == ClkPerMs - 1) MsSysClkCnt_D = '0;
     else MsSysClkCnt_D = MsSysClkCnt_DP + 1;
-
     MsTick_S = (MsSysClkCnt_DP == (ClkPerMs - 1));
 
-    Dc_SO = '1;
-    Vdd_SO = '0;
-    Rst_SON = !(State_P == RESET);
-    VBat_SON = State_P inside {PWR_VDD, RESET, INIT};
+    SpiValid_S = SpiValid_SP;
+    SpiData_D = SpiData_DP;
+    SpiLastSent_S = SpiLastSent_SP;
+
+    InitCmdIdx_D = InitCmdIdx_DP;
+    DispBufIdx_D = DispBufIdx_DP;
 
     // https://digilent.com/reference/programmable-logic/genesys-2/reference-manual#oled
     case (State_P)
@@ -120,7 +154,7 @@ module OLED_SPI #(
       end
       INIT: begin
         // 3. send initialization / configuration commands
-        Dc_SO = '0;  // data <= 1, cmd <= 0
+        Dc_S = '0;  // data <= 1, cmd <= 0
 
         if (!SpiLastSent_SP) begin
           // offer the next command byte to the shifter
@@ -144,18 +178,18 @@ module OLED_SPI #(
         // 4. Power up VBAT by pulling OLED_VBAT low. Wait 100ms for voltage to stabilize.
         if (MsTick_S) MsCtr_D = MsCtr_DP + 1;
 
-        if (MsCtr_DP == 100) begin
+        if (MsCtr_DP == 101) begin
           State = CLEAR;
           DispBufIdx_D = '0;
         end
       end
       CLEAR: begin
         // 5. Clear screen by writing zero to the display buffer.
-        Dc_SO = '1;  // data <= 1, cmd <= 0
+        Dc_S = '1;  // data <= 1, cmd <= 0
 
         if (!SpiLastSent_SP) begin
           // write zero bytes to display
-          DispBuf_D[DispBufIdx_DP] = '0;
+          // DispBuf_D[DispBufIdx_DP] = '0;
           SpiData_D = '0;
           SpiValid_S = '1;
 
@@ -173,9 +207,19 @@ module OLED_SPI #(
         end
       end
       DISP_ON: begin
-        // TBD haven't gotten farther than this
-        Dc_SO = '0;  // data <= 1, cmd <= 0
+        Dc_S = '0;  // data <= 1, cmd <= 0
+
+        // write zero bytes to display
+        SpiData_D = 8'hAF;
+        SpiValid_S = '1;
+
+        if (SpiValid_SP && SpiReady_S) begin
+          SpiValid_S = '0;
+          SpiData_D = 8'h00;
+        end
+        else if (SpiReady_S && !SpiValid_SP) State = DONE;
       end
+      DONE: begin end
       default: State = PWR_VDD;
     endcase
   end
